@@ -149,10 +149,6 @@ export class DurableFIFOObject {
     return this.deleteEntry(head, url);
   }
 
-  async appendEntry(value) {
-
-  }
-
   async append(request) {
     let tail = await this.state.storage.get("tail");
     let head = await this.state.storage.get("head");

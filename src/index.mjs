@@ -33,8 +33,12 @@ function respondJSON(obj, status = 200) {
   });
 }
 
+function sizeof(obj) {
+  // dirty hack to get the size of an object in bytes
+  return JSON.stringify(obj).length;
+}
+
 const MAX_RESPONSE_LENGTH = 64;
-const MAX_BUCKET_SIZE = 256;
 export class DurableFIFOObject {
   constructor(state, env) {
     this.state = state;
@@ -168,34 +172,11 @@ export class DurableFIFOObject {
       url: request.url + '/' + generateUUID(),
       payload: body,
     };
-    if (bucket.value.length >= MAX_BUCKET_SIZE) {
-      // CloudFlare Durable Workers have a size limit of 128 KiB per value
-      // we split the complete array into separate buckets, each one value
-      // to circumvent this limit
-      // the bucket is full, we create a new one
-      const newtail = generateUUID();
-      bucket.next = newtail;
-      await this.state.storage.put(tail, bucket);
-      bucket = {
-        next: null,
-        value: [ newval ],
-      };
-      await this.state.storage.put("tail", newtail);
-      await this.state.storage.put(newtail, bucket);
-
-      console.log(`bucket ${tail} is full, creating new bucket ${newtail}`);
-
-      return respondJSON({
-        bucket: newtail,
-        length: 1,
-        recent: newval,
-      }, 202);
-    } else {
+    try {
       bucket.value.push(newval);
       await this.state.storage.put(tail, bucket);
       await this.state.storage.put("tail", tail);
 
-      console.log(`bucket ${tail} has room, appending`);
       if (!head) {
         console.log(`setting new head ${tail}`);
         this.state.storage.put('head', tail);
@@ -206,6 +187,34 @@ export class DurableFIFOObject {
         length: bucket.value.length,
         recent: newval,
       }, 201);
+    } catch (e) {
+      if (e instanceof RangeError) {
+        // CloudFlare Durable Workers have a size limit of 128 KiB per value
+        // we split the complete array into separate buckets, each one value
+        // to circumvent this limit
+        // the bucket is full, we create a new one
+        const newtail = generateUUID();
+        bucket.next = newtail;
+        // roll back the addition
+        bucket.value.pop();
+        await this.state.storage.put(tail, bucket);
+        // create a new, empty bucket
+        bucket = {
+          next: null,
+          value: [ newval ],
+        };
+        await this.state.storage.put("tail", newtail);
+        await this.state.storage.put(newtail, bucket);
+
+        console.log(`bucket ${tail} is full (${e.message}), creating new bucket ${newtail}`);
+
+        return respondJSON({
+          bucket: newtail,
+          length: 1,
+          recent: newval,
+        }, 202);
+      }
+      throw e;
     }
   }
 }

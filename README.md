@@ -240,3 +240,61 @@ alt-svc: h3=":443"; ma=86400, h3-29=":443"; ma=86400
     "value": []
 }
 ```
+
+### Do not allow duplicates to be posted
+
+```http
+http POST https://helix-fifo.rockerduck.workers.dev/myqueue date=$(date +%s) x-unique-message-id:bar  --check-status
+HTTP/1.1 201 Created
+CF-RAY: 6f89ec9269391e65-MUC
+Connection: keep-alive
+Content-Length: 199
+Content-Type: application/json
+Date: Fri, 08 Apr 2022 09:19:55 GMT
+Expect-CT: max-age=604800, report-uri="https://report-uri.cloudflare.com/cdn-cgi/beacon/expect-ct"
+NEL: {"success_fraction":0,"report_to":"cf-nel","max_age":604800}
+Report-To: {"endpoints":[{"url":"https:\/\/a.nel.cloudflare.com\/report\/v3?s=G%2FFaKg3C4iCd0Fs%2F%2FidwnznHTeyg8XWP9ut9ssiCqs13BahzYeGfyuVBG6vGlxc7vnOW8FmFD6dgpLdoemfdZFTXytX7zvwB3BqykXZOWEwXCB%2FunbrHtkFH1R%2F0vY3gJieQdYvXl%2BZ2w%2FgCxYOdv5W6CiU%3D"}],"group":"cf-nel","max_age":604800}
+Server: cloudflare
+Vary: Accept-Encoding
+alt-svc: h3=":443"; ma=86400, h3-29=":443"; ma=86400
+
+{
+    "bucket": "bd9db974-6b24-40b3-9219-84e42e95470a",
+    "length": 24,
+    "recent": {
+        "payload": {
+            "date": "1649409594"
+        },
+        "url": "https://helix-fifo.rockerduck.workers.dev/myqueue/f50ab9ad-b1d1-4c10-91d2-eb8a2779651e"
+    }
+}
+```
+
+First time we see `x-unique-message-id: bar`, it is ok.
+
+```http
+http POST https://helix-fifo.rockerduck.workers.dev/myqueue date=$(date +%s) x-unique-message-id:bar  --check-status
+HTTP/1.1 409 Conflict
+CF-RAY: 6f89eca2df681bd5-MUC
+Connection: keep-alive
+Content-Length: 74
+Content-Type: application/json
+Date: Fri, 08 Apr 2022 09:19:57 GMT
+Expect-CT: max-age=604800, report-uri="https://report-uri.cloudflare.com/cdn-cgi/beacon/expect-ct"
+NEL: {"success_fraction":0,"report_to":"cf-nel","max_age":604800}
+Report-To: {"endpoints":[{"url":"https:\/\/a.nel.cloudflare.com\/report\/v3?s=5ruZ6Qoo56S4VxPb6NTL1IDw07Z1%2BAQ1Qe88Oqk1i9kR%2Bz%2BLUDYcrYsSaNBgKoM%2FpNNIfx9PbMJBTQr0L2f%2F0Fbo2awk%2Fq0Ve2PfQ7%2Bj%2BaKNX5%2Fb6EJm7J6UWHKAXVpo19CkHuPTDIxrGfc%2BjwNLAi%2FzmN8%3D"}],"group":"cf-nel","max_age":604800}
+Server: cloudflare
+Vary: Accept-Encoding
+alt-svc: h3=":443"; ma=86400, h3-29=":443"; ma=86400
+
+{
+    "exhausted": true,
+    "length": 0,
+    "message": "duplicate message bar",
+    "value": []
+}
+```
+
+The second time we try it, the message will get rejected.
+
+The service only checks the most recently processed messages for duplicates, duplicates of items that have been removed from the queue in the meantime will still be treated as duplicates

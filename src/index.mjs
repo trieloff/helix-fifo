@@ -12,6 +12,7 @@ async function handleRequest(request, env) {
   let resp = await obj.fetch(request.url, {
     method: request.method,
     body: request.body,
+    headers: request.headers,
   });
 
   return resp;
@@ -42,6 +43,19 @@ const MAX_RESPONSE_LENGTH = 64;
 export class DurableFIFOObject {
   constructor(state, env) {
     this.state = state;
+    this.duplicates = [];
+  }
+
+  isDuplicate(id) {
+    if (id && this.duplicates.indexOf(id) !== -1) {
+      return true;
+    } else if (id) {
+      this.duplicates.push(id);
+      if (this.duplicates.length > 1024) {
+        this.duplicates.shift();
+      }
+    }
+    return false;
   }
 
   async fetch(request) {
@@ -168,6 +182,14 @@ export class DurableFIFOObject {
       url: request.url + '/' + generateUUID(),
       payload: body,
     };
+    if (request.headers.has("x-unique-message-id") && this.isDuplicate(request.headers.get("x-unique-message-id"))) {
+      return respondJSON({
+        length: 0,
+        message: `duplicate message ${request.headers.get("x-unique-message-id")}`,
+        exhausted: true,
+        value: []
+      }, 409);
+    }
     try {
       bucket.value.push(newval);
       await this.state.storage.put(tail, bucket);

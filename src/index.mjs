@@ -68,7 +68,7 @@ export class DurableFIFOObject {
     }
 
     return new Response('Unknow method', {
-      status: 400
+      status: 405
     });
   }
 
